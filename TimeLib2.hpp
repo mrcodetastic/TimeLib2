@@ -1,159 +1,174 @@
-#ifndef _TimeLib2_h
-#ifdef __cplusplus
-#define _TimeLib2_h
+#pragma once
 
-#include <inttypes.h>
-#ifndef __AVR__
-#include <sys/types.h> // for __time_t_defined, but avr libc lacks sys/types.h
-#endif
+/*
+ * TimeLib2 v2 - ESP32-first time and date library.
+ *
+ * All public names live in namespace timelib2. The library uses the system
+ * clock (time()/settimeofday()) as the source of truth, so it cooperates with
+ * ESP32 SNTP (configTime) and survives deep sleep when the RTC keeps time.
+ *
+ * Typical use:
+ *
+ *     timelib2::Clock clock;
+ *     clock.setTimeZone("GMT0BST,M3.5.0/1,M10.5.0");  // Europe/London
+ *     // ... after SNTP sync ...
+ *     Serial.println(clock.hour());
+ */
 
+#include <Arduino.h>
+#include <atomic>
+#include <cstddef>
+#include <time.h>
 
-#if !defined(__time_t_defined) // avoid conflict with newlib or other posix libc
-typedef unsigned long time_t;
-#endif
+#include "TimeConversions.hpp"
 
+namespace timelib2 {
 
-typedef enum {timeNotSet, timeNeedsSync, timeSet
-}  timeStatus_t ;
+class Clock {
+ public:
+  /** Provider called by now() when a sync is due. May return 0 on failure. */
+  using SyncProvider = time_t (*)(void* context);
 
-typedef enum {
-    dowInvalid, dowSunday, dowMonday, dowTuesday, dowWednesday, dowThursday, dowFriday, dowSaturday
-} timeDayOfWeek_t;
+  /** Legacy provider with no context argument. */
+  using LegacySyncProvider = time_t (*)();
 
-typedef enum {
-    tmSecond, tmMinute, tmHour, tmWday, tmDay,tmMonth, tmYear, tmNbrFields
-} tmByteFields;	   
+  Clock() = default;
+  ~Clock() = default;
 
-typedef struct  { 
-  uint8_t Second; 
-  uint8_t Minute; 
-  uint8_t Hour; 
-  uint8_t Wday;   // day of week, sunday is day 1
-  uint8_t Day;
-  uint8_t Month; 
-  uint8_t Year;   // offset from 1970; 
-} 	tmElements_t, TimeElements, *tmElementsPtr_t;
+  Clock(const Clock&) = delete;
+  Clock& operator=(const Clock&) = delete;
 
-//convenience macros to convert to and from tm years 
-#define  tmYearToCalendar(Y) ((Y) + 1970)  // full four digit year 
-#define  CalendarYrToTm(Y)   ((Y) - 1970)
-#define  tmYearToY2k(Y)      ((Y) - 30)    // offset is from 2000
-#define  y2kYearToTm(Y)      ((Y) + 30)   
+  /*----------------------------------------------------------------------------
+   * Current time (UTC epoch seconds)
+   *--------------------------------------------------------------------------*/
 
-typedef time_t(*getExternalTime)();
-//typedef void  (*setExternalTime)(const time_t); // not used in this version
+  /** Return the current UTC epoch and attempt a sync if one is due. */
+  time_t now() noexcept;
 
+  /** Alias for now(), retained from TimeLib2 v1. */
+  time_t getEpochSecond() noexcept;
 
-/*==============================================================================*/
-/* Useful Constants */
-#define SECS_PER_MIN  ((time_t)(60UL))
-#define SECS_PER_HOUR ((time_t)(3600UL))
-#define SECS_PER_DAY  ((time_t)(SECS_PER_HOUR * 24UL))
-#define DAYS_PER_WEEK ((time_t)(7UL))
-#define SECS_PER_WEEK ((time_t)(SECS_PER_DAY * DAYS_PER_WEEK))
-#define SECS_PER_YEAR ((time_t)(SECS_PER_DAY * 365UL)) // TODO: ought to handle leap years
-#define SECS_YR_2000  ((time_t)(946684800UL)) // the time at the start of y2k
- 
-/* Useful Macros for getting elapsed time */
-#define numberOfSeconds(_time_) ((_time_) % SECS_PER_MIN)  
-#define numberOfMinutes(_time_) (((_time_) / SECS_PER_MIN) % SECS_PER_MIN) 
-#define numberOfHours(_time_) (((_time_) % SECS_PER_DAY) / SECS_PER_HOUR)
-#define dayOfWeek(_time_) ((((_time_) / SECS_PER_DAY + 4)  % DAYS_PER_WEEK)+1) // 1 = Sunday
-#define elapsedDays(_time_) ((_time_) / SECS_PER_DAY)  // this is number of days since Jan 1 1970
-#define elapsedSecsToday(_time_) ((_time_) % SECS_PER_DAY)   // the number of seconds since last midnight 
-// The following macros are used in calculating alarms and assume the clock is set to a date later than Jan 1 1971
-// Always set the correct time before setting alarms
-#define previousMidnight(_time_) (((_time_) / SECS_PER_DAY) * SECS_PER_DAY)  // time at the start of the given day
-#define nextMidnight(_time_) (previousMidnight(_time_)  + SECS_PER_DAY)   // time at the end of the given day 
-#define elapsedSecsThisWeek(_time_) (elapsedSecsToday(_time_) +  ((dayOfWeek(_time_)-1) * SECS_PER_DAY))   // note that week starts on day 1
-#define previousSunday(_time_) ((_time_) - elapsedSecsThisWeek(_time_))      // time at the start of the week for the given time
-#define nextSunday(_time_) (previousSunday(_time_)+SECS_PER_WEEK)          // time at the end of the week for the given time
+  /*----------------------------------------------------------------------------
+   * Calendar component accessors
+   *
+   * These return values in the configured local time: either a POSIX timezone
+   * set with setTimeZone(), or the fixed offset set with setOffset().
+   *--------------------------------------------------------------------------*/
 
+  uint8_t hour() noexcept;
+  uint8_t hour(time_t t) const noexcept;
 
-/* Useful Macros for converting elapsed time to a time_t */
-#define minutesToTime_t ((M)) ( (M) * SECS_PER_MIN)  
-#define hoursToTime_t   ((H)) ( (H) * SECS_PER_HOUR)  
-#define daysToTime_t    ((D)) ( (D) * SECS_PER_DAY) // fixed on Jul 22 2011
-#define weeksToTime_t   ((W)) ( (W) * SECS_PER_WEEK)   
+  uint8_t hourFormat12() noexcept;
+  uint8_t hourFormat12(time_t t) const noexcept;
 
-/* Universal time/date string string getter functions */ 
-#define dt_MAX_STRING_LEN 9 // length of longest date string (excluding terminating null)
-char* monthStr(uint8_t month);
-char* dayStr(uint8_t day);
-char* monthShortStr(uint8_t month);
-char* dayShortStr(uint8_t day);
-  
-  
-/*============================================================================*/
-class TimeLib2
-{
-    private:
+  bool isAM() noexcept;
+  bool isAM(time_t t) const noexcept;
+  bool isPM() noexcept;
+  bool isPM(time_t t) const noexcept;
 
-      tmElements_t tm;          // a cache of time elements
-      time_t cacheTime;   // the time the cache was updated
-      uint32_t syncInterval = 300;  // time sync will be attempted after this many seconds
+  uint8_t minute() noexcept;
+  uint8_t minute(time_t t) const noexcept;
 
-      uint32_t sysTime = 0;
-      uint32_t prevMillis = 0;
-      uint32_t nextSyncTime = 0;
-      timeStatus_t Status = timeNotSet;
+  uint8_t second() noexcept;
+  uint8_t second(time_t t) const noexcept;
 
-      long adjustmentSecs = 0;
+  uint8_t day() noexcept;
+  uint8_t day(time_t t) const noexcept;
 
-      getExternalTime getTimePtr;  // pointer to external sync function
-      
-      #ifdef TIME_DRIFT_INFO   // define this to get drift data
-      time_t sysUnsyncedTime = 0; // the time sysTime unadjusted by sync  
-      #endif      
+  uint8_t weekday() noexcept;
+  uint8_t weekday(time_t t) const noexcept;
 
-      void refreshCache(time_t t);
-    
+  uint8_t month() noexcept;
+  uint8_t month(time_t t) const noexcept;
 
-    public: 
+  uint16_t year() noexcept;
+  uint16_t year(time_t t) const noexcept;
 
-      /*  time and date functions   */
-      int     hour();            // the hour now 
-      int     hour(time_t t);    // the hour for the given time
-      int     hourFormat12();    // the hour now in 12 hour format
-      int     hourFormat12(time_t t); // the hour for the given time in 12 hour format
+  /** Break an epoch value into local calendar elements. */
+  TimeElements elementsFor(time_t t) const noexcept;
 
-      uint8_t isAM();            // returns true if time now is AM
-      uint8_t isAM(time_t t);    // returns true the given time is AM
-      uint8_t isPM();            // returns true if time now is PM
-      uint8_t isPM(time_t t);    // returns true the given time is PM
+  /** Fill a POSIX struct tm using TZ (if configured) or the fixed offset. */
+  bool localTime(time_t t, struct tm& out) const noexcept;
 
-      int     minute();          // the minute now 
-      int     minute(time_t t);  // the minute for the given time
-      int     second();          // the second now 
-      int     second(time_t t);  // the second for the given time
-      int     day();             // the day now 
-      int     day(time_t t);     // the day for the given time
-      int     weekday();         // the weekday now (Sunday is day 1) 
-      int     weekday(time_t t); // the weekday for the given time 
-      int     month();           // the month now  (Jan is month 1)
-      int     month(time_t t);   // the month for the given time
-      int     year();            // the full four digit year: (2009, 2010 etc) 
-      int     year(time_t t);    // the year for the given time
+  /*----------------------------------------------------------------------------
+   * Setting the time
+   *--------------------------------------------------------------------------*/
 
-      time_t  getEpochSecond();  // return the current time as seconds since Jan 1 1970 (aligned to Java)
-      void    setOffset(long adjustment); // adjust the EpochSecond + or -
+  /** Set the system clock from a UTC epoch value. */
+  void setTime(time_t t) noexcept;
 
-      void    setTime(time_t t);
-      void    setTime(int hr,int min,int sec,int day, int month, int yr);
+  /**
+   * Set the system clock from calendar fields.
+   *
+   * Accepts two-digit years (0..99 -> 2000..2099) or four-digit years
+   * (1970..2225). Returns false if any field is out of range.
+   */
+  bool setTime(int hr, int min, int sec, int day, int month, int year) noexcept;
 
-      /* time sync functions	*/
-      timeStatus_t timeStatus(); // indicates if time has been set and recently synchronized
-      void    setSyncProvider( getExternalTime getTimeFunction); // identify the external time provider
-      void    setSyncInterval(time_t interval); // set the number of seconds between re-sync
+  /*----------------------------------------------------------------------------
+   * Synchronisation
+   *--------------------------------------------------------------------------*/
 
-      /* low level functions to convert to and from system time                     */
-      void breakTime(time_t time, tmElements_t &tm);  // break time_t into elements
-      time_t makeTime(const tmElements_t &tm);  // convert time elements into time_t
+  /** Return the cached status. now()/getEpochSecond() drives sync attempts. */
+  TimeStatus timeStatus() const noexcept;
 
+  /** Install a provider with an optional user context. */
+  void setSyncProvider(SyncProvider provider, void* context = nullptr) noexcept;
 
+  /** Install a legacy no-context provider. */
+  void setSyncProvider(LegacySyncProvider provider) noexcept;
+
+  /** Remove any configured sync provider. */
+  void clearSyncProvider() noexcept;
+
+  /** Allow setSyncProvider(nullptr) to clear the provider unambiguously. */
+  void setSyncProvider(std::nullptr_t) noexcept;
+
+  /** Set the minimum number of seconds between sync attempts. */
+  void setSyncInterval(uint32_t seconds) noexcept;
+
+  /*----------------------------------------------------------------------------
+   * Local time configuration
+   *--------------------------------------------------------------------------*/
+
+  /** Apply a fixed offset (in seconds) to component accessors. */
+  void setOffset(time_t adjustment) noexcept;
+
+  /** Return the fixed offset in seconds. */
+  time_t offset() const noexcept;
+
+  /**
+   * Configure a POSIX TZ string, e.g. "GMT0BST,M3.5.0/1,M10.5.0".
+   * TZ is process-global; component accessors become DST-aware.
+   */
+  void setTimeZone(const char* posixTz) noexcept;
+
+  /** Clear the POSIX timezone and fall back to the fixed offset. */
+  void clearTimeZone() noexcept;
+
+  /*----------------------------------------------------------------------------
+   * Low-level conversion (static, no instance state)
+   *--------------------------------------------------------------------------*/
+
+  static void breakTime(time_t t, TimeElements& elements) noexcept;
+  static time_t makeTime(const TimeElements& elements) noexcept;
+
+ private:
+  void maybeSync() noexcept;
+  void applyTime(time_t t) noexcept;
+
+  std::atomic<int32_t> offsetSecs_{0};
+  std::atomic<bool> tzConfigured_{false};
+  std::atomic<uint32_t> syncIntervalSeconds_{300};
+  std::atomic<uint32_t> nextSyncMs_{0};
+  std::atomic<bool> syncInProgress_{false};
+  std::atomic<TimeStatus> status_{TimeStatus::NotSet};
+  std::atomic<SyncProvider> provider_{nullptr};
+  std::atomic<void*> providerContext_{nullptr};
+  std::atomic<LegacySyncProvider> legacyProvider_{nullptr};
 };
 
+/** Discoverability alias: timelib2::TimeLib2 works like timelib2::Clock. */
+using TimeLib2 = Clock;
 
-#endif // __cplusplus
-#endif /* _TimeLib2_h */
-
+}  // namespace timelib2

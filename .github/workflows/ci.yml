@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  native-tests:
+    name: Host conversion tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Run native tests
+        run: pio test -e native
+
+  esp32-build:
+    name: ESP32 example builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Compile examples for esp32dev
+        run: |
+          for example in \
+            examples/TimeNTP_ESP32 \
+            examples/TimeZone_ESP32 \
+            examples/DeepSleepTime_ESP32; do
+            echo "Building $example"
+            pio ci "$example" --board esp32dev --lib . \
+              --project-option="platform=espressif32@6.9.0" \
+              --project-option="build_flags=-std=gnu++17 -Wall -Wextra"
+          done

@@ -1,34 +1,63 @@
 #######################################
-# Syntax Coloring Map For Time
+# Syntax Coloring Map For TimeLib2
 #######################################
 
 #######################################
 # Datatypes (KEYWORD1)
 #######################################
+timelib2	KEYWORD1
+Clock	KEYWORD1
+TimeLib2	KEYWORD1
+TimeElements	KEYWORD1
+tmElements_t	KEYWORD1
+TimeStatus	KEYWORD1
+DayOfWeek	KEYWORD1
 time_t	KEYWORD1
+
 #######################################
 # Methods and Functions (KEYWORD2)
 #######################################
 now	KEYWORD2
-second	KEYWORD2
-minute	KEYWORD2
+getEpochSecond	KEYWORD2
 hour	KEYWORD2
+hourFormat12	KEYWORD2
+minute	KEYWORD2
+second	KEYWORD2
 day	KEYWORD2
+weekday	KEYWORD2
 month	KEYWORD2
 year	KEYWORD2
 isAM	KEYWORD2
 isPM	KEYWORD2
-weekday	KEYWORD2
+elementsFor	KEYWORD2
+localTime	KEYWORD2
 setTime	KEYWORD2
-adjustTime	KEYWORD2
-setSyncProvider	KEYWORD2
-setSyncInterval	KEYWORD2
+setOffset	KEYWORD2
+offset	KEYWORD2
+setTimeZone	KEYWORD2
+clearTimeZone	KEYWORD2
 timeStatus	KEYWORD2
-TimeLib	KEYWORD2
-#######################################
-# Instances (KEYWORD2)
-#######################################
+setSyncProvider	KEYWORD2
+clearSyncProvider	KEYWORD2
+setSyncInterval	KEYWORD2
+breakTime	KEYWORD2
+makeTime	KEYWORD2
+monthStr	KEYWORD2
+monthShortStr	KEYWORD2
+dayStr	KEYWORD2
+dayShortStr	KEYWORD2
 
 #######################################
 # Constants (LITERAL1)
 #######################################
+NotSet	LITERAL1
+NeedsSync	LITERAL1
+Set	LITERAL1
+timeNotSet	LITERAL1
+timeNeedsSync	LITERAL1
+timeSet	LITERAL1
+SECS_PER_MIN	LITERAL1
+SECS_PER_HOUR	LITERAL1
+SECS_PER_DAY	LITERAL1
+SECS_PER_WEEK	LITERAL1
+SECS_YR_2000	LITERAL1

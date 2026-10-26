@@ -1,20 +1,26 @@
 {
     "name": "TimeLib2",
-    "description": "Time and date keeping functionality for Arduino. Class based and therefore supports multiple instances / clocks in parallel.",
-    "keywords": "Time, date, hour, minute, second, day, week, month, year, RTC",
+    "version": "2.0.0",
+    "description": "ESP32-only time and date library. Namespace-scoped, class-based, 64-bit time_t, SNTP-ready, with POSIX timezone support.",
+    "keywords": "time, date, clock, rtc, ntp, sntp, esp32, timezone",
+    "license": "LGPL-2.1-or-later",
     "authors": [
         {
             "name": "Faptastic",
-            "maintainer": true            
+            "maintainer": true
         }
     ],
     "repository": {
         "type": "git",
-         "url": "https://github.com/mrfaptastic/TimeLib2"
+        "url": "https://github.com/mrfaptastic/TimeLib2"
     },
-    "version": "1.0.0",
     "homepage": "https://github.com/mrfaptastic/TimeLib2",
-    "frameworks": "Arduino",
+    "frameworks": [
+        "arduino"
+    ],
+    "platforms": [
+        "espressif32"
+    ],
     "examples": [
         "examples/*/*.ino"
     ]

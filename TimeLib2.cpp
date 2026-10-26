@@ -1,303 +1,313 @@
 /*
-  time.c - low level time and date functions
-  Copyright (c) Michael Margolis 2009-2014
-
-  This library is free software; you can redistribute it and/or
-  modify it under the terms of the GNU Lesser General Public
-  License as published by the Free Software Foundation; either
-  version 2.1 of the License, or (at your option) any later version.
-
-  This library is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  Lesser General Public License for more details.
-
-  You should have received a copy of the GNU Lesser General Public
-  License along with this library; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-  
-  1.0  6  Jan 2010 - initial release
-  1.1  12 Feb 2010 - fixed leap year calculation error
-  1.2  1  Nov 2010 - fixed setTime bug (thanks to Korman for this)
-  1.3  24 Mar 2012 - many edits by Paul Stoffregen: fixed timeStatus() to update
-                     status, updated examples for Arduino 1.0, fixed ARM
-                     compatibility issues, added TimeArduinoDue and TimeTeensy3
-                     examples, add error checking and messages to RTC examples,
-                     add examples to DS1307RTC library.
-  1.4  5  Sep 2014 - compatibility with Arduino 1.5.7
-*/
-
-#if ARDUINO >= 100
-#include <Arduino.h> 
-#else
-#include <WProgram.h> 
-#endif
+ * TimeLib2.cpp - ESP32-first clock implementation.
+ *
+ * The system clock (time()/settimeofday()) is the single source of truth.
+ * A monotonic tick is used only to decide when a sync attempt is due.
+ */
 
 #include "TimeLib2.hpp"
 
-void TimeLib2::refreshCache(time_t t) {
-  if (t != cacheTime) {
-    breakTime(t, tm); 
-    cacheTime = t; 
-  }
-}
+#include <stdlib.h>
+#include <sys/time.h>
 
-int TimeLib2::hour() { // the hour now 
-  return hour(getEpochSecond()); 
-}
-
-int TimeLib2::hour(time_t t) { // the hour for the given time
-  refreshCache(t);
-  return tm.Hour;  
-}
-
-int TimeLib2::hourFormat12() { // the hour now in 12 hour format
-  return hourFormat12(getEpochSecond()); 
-}
-
-int TimeLib2::hourFormat12(time_t t) { // the hour for the given time in 12 hour format
-  refreshCache(t);
-  if( tm.Hour == 0 )
-    return 12; // 12 midnight
-  else if( tm.Hour  > 12)
-    return tm.Hour - 12 ;
-  else
-    return tm.Hour ;
-}
-
-uint8_t TimeLib2::isAM() { // returns true if time now is AM
-  return !isPM(getEpochSecond()); 
-}
-
-uint8_t TimeLib2::isAM(time_t t) { // returns true if given time is AM
-  return !isPM(t);  
-}
-
-uint8_t TimeLib2::isPM() { // returns true if PM
-  return isPM(getEpochSecond()); 
-}
-
-uint8_t TimeLib2::isPM(time_t t) { // returns true if PM
-  return (hour(t) >= 12); 
-}
-
-int TimeLib2::TimeLib2::minute() {
-  return minute(getEpochSecond()); 
-}
-
-int TimeLib2::minute(time_t t) { // the minute for the given time
-  refreshCache(t);
-  return tm.Minute;  
-}
-
-int TimeLib2::second() {
-  return second(getEpochSecond()); 
-}
-
-int TimeLib2::second(time_t t) {  // the second for the given time
-  refreshCache(t);
-  return tm.Second;
-}
-
-int TimeLib2::day(){
-  return(day(getEpochSecond())); 
-}
-
-int TimeLib2::day(time_t t) { // the day for the given time (0-6)
-  refreshCache(t);
-  return tm.Day;
-}
-
-int TimeLib2::weekday() {   // Sunday is day 1
-  return  weekday(getEpochSecond()); 
-}
-
-int TimeLib2::weekday(time_t t) {
-  refreshCache(t);
-  return tm.Wday;
-}
-   
-int TimeLib2::month(){
-  return month(getEpochSecond()); 
-}
-
-int TimeLib2::month(time_t t) {  // the month for the given time
-  refreshCache(t);
-  return tm.Month;
-}
-
-int TimeLib2::year() {  // as in Processing, the full four digit year: (2009, 2010 etc) 
-  return year(getEpochSecond()); 
-}
-
-int TimeLib2::year(time_t t) { // the year for the given time
-  refreshCache(t);
-  return tmYearToCalendar(tm.Year);
-}
-
-/*============================================================================*/	
-/* functions to convert to and from system time */
-/* These are for interfacing with time services and are not normally needed in a sketch */
-
-// leap year calculator expects year argument as years offset from 1970
-#define LEAP_YEAR(Y)     ( ((1970+(Y))>0) && !((1970+(Y))%4) && ( ((1970+(Y))%100) || !((1970+(Y))%400) ) )
-
-static  const uint8_t monthDays[]={31,28,31,30,31,30,31,31,30,31,30,31}; // API starts months from 1, this array starts from 0
- 
-void TimeLib2::breakTime(time_t timeInput, tmElements_t &tm) {
-// break the given time_t into time components
-// this is a more compact version of the C library localtime function
-// note that year is offset from 1970 !!!
-
-  uint8_t year;
-  uint8_t month, monthLength;
-  uint32_t time;
-  unsigned long days;
-
-  time = (uint32_t)timeInput;
-  tm.Second = time % 60;
-  time /= 60; // now it is minutes
-  tm.Minute = time % 60;
-  time /= 60; // now it is hours
-  tm.Hour = time % 24;
-  time /= 24; // now it is days
-  tm.Wday = ((time + 4) % 7) + 1;  // Sunday is day 1 
-  
-  year = 0;  
-  days = 0;
-  while((unsigned)(days += (LEAP_YEAR(year) ? 366 : 365)) <= time) {
-    year++;
-  }
-  tm.Year = year; // year is offset from 1970 
-  
-  days -= LEAP_YEAR(year) ? 366 : 365;
-  time  -= days; // now it is days in this year, starting at 0
-  
-  days=0;
-  month=0;
-  monthLength=0;
-  for (month=0; month<12; month++) {
-    if (month==1) { // february
-      if (LEAP_YEAR(year)) {
-        monthLength=29;
-      } else {
-        monthLength=28;
-      }
-    } else {
-      monthLength = monthDays[month];
-    }
-    
-    if (time >= monthLength) {
-      time -= monthLength;
-    } else {
-        break;
-    }
-  }
-  tm.Month = month + 1;  // jan is month 1  
-  tm.Day = time + 1;     // day of month
-}
-
-time_t TimeLib2::makeTime(const tmElements_t &tm){   
-// assemble time elements into time_t 
-// note year argument is offset from 1970 (see macros in time.h to convert to other formats)
-// previous version used full four digit year (or digits since 2000),i.e. 2009 was 2009 or 9
-  
-  int i;
-  uint32_t seconds;
-
-  // seconds from 1970 till 1 jan 00:00:00 of the given year
-  seconds= tm.Year*(SECS_PER_DAY * 365);
-  for (i = 0; i < tm.Year; i++) {
-    if (LEAP_YEAR(i)) {
-      seconds += SECS_PER_DAY;   // add extra days for leap years
-    }
-  }
-  
-  // add days for this year, months start from 1
-  for (i = 1; i < tm.Month; i++) {
-    if ( (i == 2) && LEAP_YEAR(tm.Year)) { 
-      seconds += SECS_PER_DAY * 29;
-    } else {
-      seconds += SECS_PER_DAY * monthDays[i-1];  //monthDay array starts from 0
-    }
-  }
-  seconds+= (tm.Day-1) * SECS_PER_DAY;
-  seconds+= tm.Hour * SECS_PER_HOUR;
-  seconds+= tm.Minute * SECS_PER_MIN;
-  seconds+= tm.Second;
-  return (time_t)seconds; 
-}
-
-time_t TimeLib2::getEpochSecond() {
-	// calculate number of seconds passed since last call to getEpochSecond()
-  while (millis() - prevMillis >= 1000) {
-		// millis() and prevMillis are both unsigned ints thus the subtraction will always be the absolute value of the difference
-    sysTime++;
-    prevMillis += 1000;	
-#ifdef TIME_DRIFT_INFO
-    sysUnsyncedTime++; // this can be compared to the synced time to measure long term drift     
-#endif
-  }
-  if (nextSyncTime <= sysTime + adjustmentSecs) {
-    if (getTimePtr != 0) {
-      time_t t = getTimePtr();
-      if (t != 0) {
-        setTime(t);
-      } else {
-        nextSyncTime = sysTime + adjustmentSecs + syncInterval;
-        Status = (Status == timeNotSet) ?  timeNotSet : timeNeedsSync;
-      }
-    }
-  }  
-  return (time_t)sysTime + adjustmentSecs;
-}
-
-void TimeLib2::setTime(time_t t) { 
-#ifdef TIME_DRIFT_INFO
- if(sysUnsyncedTime == 0) 
-   sysUnsyncedTime = t;   // store the time of the first call to set a valid Time   
+#if defined(ESP32)
+#include <esp_timer.h>
 #endif
 
-  sysTime = (uint32_t)t;  
-  nextSyncTime = (uint32_t)t + adjustmentSecs+ syncInterval;
-  Status = timeSet;
-  prevMillis = millis();  // restart counting from now (thanks to Korman for this fix)
-} 
+namespace timelib2 {
+namespace {
 
-void TimeLib2::setTime(int hr,int min,int sec,int dy, int mnth, int yr){
- // year can be given as full four digit year or two digts (2010 or 10 for 2010);  
- //it is converted to years since 1970
-  if( yr > 99)
-      yr = yr - 1970;
-  else
-      yr += 30;  
-  tm.Year = yr;
-  tm.Month = mnth;
-  tm.Day = dy;
-  tm.Hour = hr;
-  tm.Minute = min;
-  tm.Second = sec;
-  setTime(makeTime(tm));
+/* Monotonic milliseconds. The value may wrap after ~49 days, which is fine
+ * because all comparisons are wrap-safe. */
+uint32_t monotonicMs() noexcept {
+#if defined(ESP32)
+  return static_cast<uint32_t>(esp_timer_get_time() / 1000);
+#else
+  return static_cast<uint32_t>(millis());
+#endif
 }
 
-void TimeLib2::setOffset(long adjustment) {
-  adjustmentSecs = adjustment;
-  //sysTime += adjustment;
+/* Epoch for 2020-01-01T00:00:00Z. Any system time at or after this is treated
+ * as a real, externally-set clock (for example by ESP32 configTime/SNTP). */
+constexpr time_t kMinValidEpoch = 1577836800;
+
+}  // namespace
+
+/*==============================================================================
+ * Synchronisation
+ *============================================================================*/
+
+void Clock::maybeSync() noexcept {
+  const SyncProvider provider = provider_.load(std::memory_order_acquire);
+  const LegacySyncProvider legacy = legacyProvider_.load(std::memory_order_acquire);
+
+  if (provider == nullptr && legacy == nullptr) {
+    return;
+  }
+
+  const uint32_t nowMs = monotonicMs();
+  if (static_cast<int32_t>(nowMs - nextSyncMs_.load(std::memory_order_relaxed)) < 0) {
+    return;
+  }
+
+  bool expected = false;
+  if (!syncInProgress_.compare_exchange_strong(expected, true,
+                                               std::memory_order_acq_rel)) {
+    return;
+  }
+
+  const time_t result =
+      (provider != nullptr)
+          ? provider(providerContext_.load(std::memory_order_relaxed))
+          : legacy();
+
+  if (result > 0) {
+    applyTime(result);
+  } else if (status_.load(std::memory_order_relaxed) != TimeStatus::NotSet) {
+    status_.store(TimeStatus::NeedsSync, std::memory_order_relaxed);
+  }
+
+  /* Schedule from the end of the attempt so a slow provider does not cause an
+   * immediate second sync. */
+  const uint64_t interval =
+      static_cast<uint64_t>(syncIntervalSeconds_.load(std::memory_order_relaxed));
+  const uint64_t nextMs =
+      static_cast<uint64_t>(monotonicMs()) + interval * 1000ull;
+  nextSyncMs_.store(static_cast<uint32_t>(nextMs), std::memory_order_relaxed);
+
+  syncInProgress_.store(false, std::memory_order_release);
 }
 
-// indicates if time has been set and recently synchronized
-timeStatus_t TimeLib2::timeStatus() {
-  getEpochSecond(); // required to actually update the status
-  return Status;
+void Clock::applyTime(time_t t) noexcept {
+  struct timeval tv;
+  tv.tv_sec = t;
+  tv.tv_usec = 0;
+  settimeofday(&tv, nullptr);
+  status_.store(TimeStatus::Set, std::memory_order_relaxed);
 }
 
-void TimeLib2::setSyncProvider( getExternalTime getTimeFunction){
-  getTimePtr = getTimeFunction;  
-  nextSyncTime = sysTime + adjustmentSecs;
-  getEpochSecond(); // this will sync the clock
+time_t Clock::now() noexcept {
+  maybeSync();
+
+  time_t t = time(nullptr);
+  if (t < 0) {
+    t = 0;
+  }
+
+  /* If the system clock was set externally (configTime/SNTP or otherwise),
+   * reflect that in the status without requiring a provider. */
+  if (t >= kMinValidEpoch &&
+      status_.load(std::memory_order_relaxed) == TimeStatus::NotSet) {
+    status_.store(TimeStatus::Set, std::memory_order_relaxed);
+  }
+
+  return t;
 }
 
-void TimeLib2::setSyncInterval(time_t interval){ // set the number of seconds between re-sync
-  syncInterval = (uint32_t)interval;
-  nextSyncTime = sysTime + adjustmentSecs + syncInterval;
+time_t Clock::getEpochSecond() noexcept { return now(); }
+
+TimeStatus Clock::timeStatus() const noexcept {
+  return status_.load(std::memory_order_relaxed);
 }
+
+void Clock::setSyncProvider(SyncProvider provider, void* context) noexcept {
+  providerContext_.store(context, std::memory_order_relaxed);
+  provider_.store(provider, std::memory_order_release);
+  legacyProvider_.store(nullptr, std::memory_order_release);
+  nextSyncMs_.store(monotonicMs(), std::memory_order_relaxed);
+}
+
+void Clock::setSyncProvider(LegacySyncProvider provider) noexcept {
+  provider_.store(nullptr, std::memory_order_release);
+  providerContext_.store(nullptr, std::memory_order_relaxed);
+  legacyProvider_.store(provider, std::memory_order_release);
+  nextSyncMs_.store(monotonicMs(), std::memory_order_relaxed);
+}
+
+void Clock::clearSyncProvider() noexcept {
+  provider_.store(nullptr, std::memory_order_release);
+  providerContext_.store(nullptr, std::memory_order_relaxed);
+  legacyProvider_.store(nullptr, std::memory_order_release);
+}
+
+void Clock::setSyncProvider(std::nullptr_t) noexcept { clearSyncProvider(); }
+
+void Clock::setSyncInterval(uint32_t seconds) noexcept {
+  syncIntervalSeconds_.store(seconds, std::memory_order_relaxed);
+  const uint64_t nextMs =
+      static_cast<uint64_t>(monotonicMs()) + static_cast<uint64_t>(seconds) * 1000ull;
+  nextSyncMs_.store(static_cast<uint32_t>(nextMs), std::memory_order_relaxed);
+}
+
+/*==============================================================================
+ * Setting the time
+ *============================================================================*/
+
+void Clock::setTime(time_t t) noexcept { applyTime(t); }
+
+bool Clock::setTime(int hr, int min, int sec, int day, int month, int year) noexcept {
+  if (hr < 0 || hr > 23 || min < 0 || min > 59 || sec < 0 || sec > 59) {
+    return false;
+  }
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return false;
+  }
+
+  int fullYear = year;
+  if (fullYear >= 0 && fullYear < 100) {
+    fullYear += 2000;
+  }
+  if (fullYear < 1970 || fullYear > 2225) {
+    return false;
+  }
+
+  time_t epoch;
+  if (tzConfigured_.load(std::memory_order_relaxed)) {
+    struct tm local = {};
+    local.tm_sec = sec;
+    local.tm_min = min;
+    local.tm_hour = hr;
+    local.tm_mday = day;
+    local.tm_mon = month - 1;
+    local.tm_year = fullYear - 1900;
+    local.tm_isdst = -1;
+    epoch = mktime(&local);
+    if (epoch == static_cast<time_t>(-1)) {
+      return false;
+    }
+  } else {
+    TimeElements elements;
+    elements.Second = static_cast<uint8_t>(sec);
+    elements.Minute = static_cast<uint8_t>(min);
+    elements.Hour = static_cast<uint8_t>(hr);
+    elements.Day = static_cast<uint8_t>(day);
+    elements.Month = static_cast<uint8_t>(month);
+    elements.Year = static_cast<uint8_t>(fullYear - 1970);
+    epoch = makeTime(elements);
+  }
+
+  applyTime(epoch);
+  return true;
+}
+
+/*==============================================================================
+ * Local time
+ *============================================================================*/
+
+void Clock::setOffset(time_t adjustment) noexcept {
+  offsetSecs_.store(static_cast<int32_t>(adjustment), std::memory_order_relaxed);
+  tzConfigured_.store(false, std::memory_order_relaxed);
+}
+
+time_t Clock::offset() const noexcept {
+  return static_cast<time_t>(offsetSecs_.load(std::memory_order_relaxed));
+}
+
+void Clock::setTimeZone(const char* posixTz) noexcept {
+  if (posixTz != nullptr && posixTz[0] != '\0') {
+    setenv("TZ", posixTz, 1);
+    tzConfigured_.store(true, std::memory_order_relaxed);
+  } else {
+    unsetenv("TZ");
+    tzConfigured_.store(false, std::memory_order_relaxed);
+  }
+  tzset();
+}
+
+void Clock::clearTimeZone() noexcept {
+  unsetenv("TZ");
+  tzset();
+  tzConfigured_.store(false, std::memory_order_relaxed);
+}
+
+TimeElements Clock::elementsFor(time_t t) const noexcept {
+  TimeElements elements;
+
+  if (tzConfigured_.load(std::memory_order_relaxed)) {
+    struct tm local = {};
+    if (localtime_r(&t, &local) != nullptr) {
+      elements.Second = static_cast<uint8_t>(local.tm_sec);
+      elements.Minute = static_cast<uint8_t>(local.tm_min);
+      elements.Hour = static_cast<uint8_t>(local.tm_hour);
+      elements.Wday = static_cast<uint8_t>(local.tm_wday + 1);
+      elements.Day = static_cast<uint8_t>(local.tm_mday);
+      elements.Month = static_cast<uint8_t>(local.tm_mon + 1);
+      int yearOffset = (local.tm_year + 1900) - 1970;
+      if (yearOffset < 0) {
+        yearOffset = 0;
+      } else if (yearOffset > 255) {
+        yearOffset = 255;
+      }
+      elements.Year = static_cast<uint8_t>(yearOffset);
+      return elements;
+    }
+  }
+
+  breakTime(t + offsetSecs_.load(std::memory_order_relaxed), elements);
+  return elements;
+}
+
+bool Clock::localTime(time_t t, struct tm& out) const noexcept {
+  if (tzConfigured_.load(std::memory_order_relaxed)) {
+    return localtime_r(&t, &out) != nullptr;
+  }
+
+  const time_t shifted = t + static_cast<time_t>(offsetSecs_.load(std::memory_order_relaxed));
+  return gmtime_r(&shifted, &out) != nullptr;
+}
+
+/*==============================================================================
+ * Component accessors
+ *============================================================================*/
+
+uint8_t Clock::hour() noexcept { return hour(now()); }
+uint8_t Clock::hour(time_t t) const noexcept { return elementsFor(t).Hour; }
+
+uint8_t Clock::minute() noexcept { return minute(now()); }
+uint8_t Clock::minute(time_t t) const noexcept { return elementsFor(t).Minute; }
+
+uint8_t Clock::second() noexcept { return second(now()); }
+uint8_t Clock::second(time_t t) const noexcept { return elementsFor(t).Second; }
+
+uint8_t Clock::day() noexcept { return day(now()); }
+uint8_t Clock::day(time_t t) const noexcept { return elementsFor(t).Day; }
+
+uint8_t Clock::weekday() noexcept { return weekday(now()); }
+uint8_t Clock::weekday(time_t t) const noexcept { return elementsFor(t).Wday; }
+
+uint8_t Clock::month() noexcept { return month(now()); }
+uint8_t Clock::month(time_t t) const noexcept { return elementsFor(t).Month; }
+
+uint16_t Clock::year() noexcept { return year(now()); }
+uint16_t Clock::year(time_t t) const noexcept {
+  return static_cast<uint16_t>(1970 + elementsFor(t).Year);
+}
+
+uint8_t Clock::hourFormat12() noexcept { return hourFormat12(now()); }
+uint8_t Clock::hourFormat12(time_t t) const noexcept {
+  const uint8_t h = hour(t);
+  if (h == 0) {
+    return 12;
+  }
+  return (h > 12) ? static_cast<uint8_t>(h - 12) : h;
+}
+
+bool Clock::isAM() noexcept { return isAM(now()); }
+bool Clock::isAM(time_t t) const noexcept { return !isPM(t); }
+
+bool Clock::isPM() noexcept { return isPM(now()); }
+bool Clock::isPM(time_t t) const noexcept { return hour(t) >= 12; }
+
+/*==============================================================================
+ * Static conversion wrappers
+ *============================================================================*/
+
+void Clock::breakTime(time_t t, TimeElements& elements) noexcept {
+  timelib2::breakTime(t, elements);
+}
+
+time_t Clock::makeTime(const TimeElements& elements) noexcept {
+  return timelib2::makeTime(elements);
+}
+
+}  // namespace timelib2

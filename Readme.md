@@ -1,126 +1,219 @@
-# Arduino Time Library
+# TimeLib2
 
-Time is a library that provides timekeeping functionality for Arduino.
+TimeLib2 is an **ESP32-only** time and date library. It provides class-based
+clocks on top of the ESP32 system clock, is fully namespace-scoped, supports
+64-bit `time_t`, and integrates naturally with ESP32 SNTP (`configTime`) as
+well as custom time providers.
 
-Using the Arduino Library Manager, install "*TimeLib2* by *Faptastic*".
-
-A primary goal was to enable date and time functionality that can be used with
-a variety of external time sources with minimum differences required in sketch logic.
-
-Example sketches illustrate how similar sketch code can be used with internet NTP time service.
-
-## Functionality
-
-To use the Time library in an Arduino sketch, include TimeLib2.h.
-
-Unlike TimeLib, TimeLib2 uses a seperate class for each clock you wish to manage, so you can  have different clocks at different offsets / timezones.
-
-```c
+```cpp
 #include <TimeLib2.hpp>
 
-TimeLib2 clock;
+timelib2::Clock timeClock;
 
-clock.setTime(<insert unix timestamp here>)
-clock.setOffset(<insert unix timestamp here>)
+void setup() {
+  Serial.begin(115200);
+  configTime(0, 0, "pool.ntp.org");                    // ESP32 SNTP, UTC
+  timeClock.setTimeZone("GMT0BST,M3.5.0/1,M10.5.0");   // Europe/London + DST
+}
 
-time_t epoch = clock.getEpochSecond(); // historically called now(), but changed the name to align to java.time
-
-
+void loop() {
+  time_t utc = timeClock.now();                        // UTC epoch seconds
+  Serial.printf("%04u-%02u-%02u %02u:%02u:%02u\n",
+                static_cast<unsigned>(timeClock.year(utc)),
+                static_cast<unsigned>(timeClock.month(utc)),
+                static_cast<unsigned>(timeClock.day(utc)),
+                static_cast<unsigned>(timeClock.hour(utc)),
+                static_cast<unsigned>(timeClock.minute(utc)),
+                static_cast<unsigned>(timeClock.second(utc)));
+  delay(1000);
+}
 ```
 
-The functions available from the TimeLib2 class include
+> **Naming note:** do not name a `Clock` instance `clock`. POSIX declares a
+> `clock()` function, and the variable would shadow it. Use names such as
+> `timeClock`, `rtcClock`, or `localClock`.
 
-```c
-hour();            // the hour now  (0-23)
-minute();          // the minute now (0-59)
-second();          // the second now (0-59)
-day();             // the day now (1-31)
-weekday();         // day of the week (1-7), Sunday is day 1
-month();           // the month now (1-12)
-year();            // the full four digit year: (2009, 2010 etc)
+## Highlights
+
+- **No global namespace pollution.** Everything lives in `namespace timelib2`.
+- **ESP32-native.** Uses `time()` / `settimeofday()`; cooperates with
+  `configTime()`/SNTP and survives deep sleep when the RTC keeps time.
+- **64-bit `time_t`.** No hand-rolled typedef and no 2038 truncation.
+- **Multiple clocks.** Each `Clock` has its own offset, status, and sync
+  provider.
+- **POSIX timezone/DST.** `setTimeZone()` accepts standard `TZ` strings.
+- **Context-aware sync providers.** `setSyncProvider(provider, context)` binds
+  per-instance state; legacy no-context providers are also supported.
+- **Thread-friendly.** Getters are stateless; sync bookkeeping uses atomics.
+- **Host-testable core.** Conversions are free of Arduino dependencies.
+
+## Requirements
+
+- **ESP32 only.** The package metadata declares `architectures=esp32`
+  (`library.properties`) and `platforms: ["espressif32"]` (`library.json`).
+- ESP32 Arduino core 2.x or 3.x.
+- C++11 or newer (the bundled PlatformIO config uses gnu++17).
+
+## Installation
+
+Arduino Library Manager: search for **TimeLib2** by **Faptastic**.
+
+PlatformIO:
+
+```ini
+lib_deps = mrfaptastic/TimeLib2
 ```
 
-there are also functions to return the hour in 12-hour format
+## Time model
 
-```c
-hourFormat12();    // the hour now in 12 hour format
-isAM();            // returns true if time now is AM
-isPM();            // returns true if time now is PM
+| Function | Meaning |
+| --- | --- |
+| `now()`, `getEpochSecond()` | Current **UTC** Unix epoch seconds. |
+| `hour()`, `minute()`, `second()`, `day()`, `month()`, `year()`, `weekday()` | Calendar values in the configured **local** time. |
+| `setTime(t)` | Sets the system clock to UTC epoch `t`. |
+| `setTime(hr, min, sec, day, month, year)` | Sets the system clock from calendar fields; returns `bool`. |
+| `setOffset(seconds)` | Fixed local offset used by calendar accessors. |
+| `setTimeZone(posixTz)` | POSIX timezone (DST-aware) used by calendar accessors. |
+| `localTime(t, tm)` | Fills a POSIX `struct tm` using TZ or the fixed offset. |
+| `elementsFor(t)` | Returns local `TimeElements` for `t`. |
 
-getEpochSecond();             // returns the current time as seconds since Jan 1 1970
+> **v2 semantics:** `now()` and `getEpochSecond()` return UTC. A fixed
+> `setOffset()` affects calendar accessors and `localTime()`, not the epoch
+> returned by `now()`.
+
+The component accessors accept an explicit epoch (`hour(t)`, `day(t)`, ...) so a
+single timestamp can be read consistently even if the clock rolls over between
+calls.
+
+## Timezones and DST
+
+Use a POSIX `TZ` string for automatic daylight-saving transitions:
+
+```cpp
+timeClock.setTimeZone("GMT0BST,M3.5.0/1,M10.5.0");  // Europe/London
+timeClock.setTimeZone("EST5EDT,M3.2.0/2,M11.1.0/2"); // US Eastern
+timeClock.setTimeZone("UTC0");                        // UTC
 ```
 
-The time and date functions can take an optional parameter for the time. This prevents
-errors if the time rolls over between elements. For example, if a new minute begins
-between getting the minute and second, the values will be inconsistent. Using the
-following functions eliminates this problem
+For a simple, DST-free offset:
 
-```c
-time_t t = now(); // store the current time in time variable t
-hour(t);          // returns the hour for the given time t
-minute(t);        // returns the minute for the given time t
-second(t);        // returns the second for the given time t
-day(t);           // the day for the given time t
-weekday(t);       // day of the week for the given time t
-month(t);         // the month for the given time t
-year(t);          // the year for the given time t
+```cpp
+timeClock.setOffset(2 * timelib2::SECS_PER_HOUR);     // UTC+2
 ```
 
-Functions for managing the timer services are:
+> `TZ` is process-global. If multiple `Clock` instances are used, prefer fixed
+> offsets per instance or keep a single POSIX timezone for the application.
 
-```c
-setTime(t);                      // set the system time to the give time t
-setTime(hr,min,sec,day,mnth,yr); // alternative to above, yr is 2 or 4 digit yr
-                                 // (2010 or 10 sets year to 2010)
-setOffset(adjustment);          // adjust system time by adding the adjustment value
-timeStatus();                    // indicates if time has been set and recently synchronized
-                                 // returns one of the following enumerations:
-timeNotSet                       // the time has never been set, the clock started on Jan 1, 1970
-timeNeedsSync                    // the time had been set but a sync attempt did not succeed
-timeSet                          // the time is set and is synced
+## Synchronisation
+
+### ESP32 SNTP (recommended)
+
+```cpp
+configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 ```
 
-Time and Date values are not valid if the status is `timeNotSet`. Otherwise, values can be used but
-the returned time may have drifted if the status is `timeNeedsSync`. 	
+The system clock is updated by the ESP32 SNTP client; `Clock` reads it
+directly. `timeStatus()` becomes `TimeStatus::Set` once the clock is valid.
 
-```c
-setSyncProvider(getTimeFunction);  // set the external time provider
-setSyncInterval(interval);         // set the number of seconds between re-sync
+### Custom provider
+
+```cpp
+time_t readRtc(void* context) {
+  auto* rtc = static_cast<MyRtc*>(context);
+  return rtc->readEpoch();
+}
+
+timeClock.setSyncProvider(readRtc, &myRtc);
+timeClock.setSyncInterval(600);  // seconds between attempts
 ```
 
-There are many convenience macros in the `TimeLib.hpp` file for time constants and conversion
-of time units.
+The provider is called from `now()` when a sync is due. Returning `0` marks the
+status as `TimeStatus::NeedsSync`. Legacy providers with no context are also
+supported:
 
-To use the library, copy the download to the Library directory.
-
-## Example
-
-Refer to the 'examples' folder.
-
-## Technical Notes
-
-Internal system time is based on the standard Unix `time_t`.
-The value is the number of seconds since Jan 1, 1970.
-System time begins at zero when the sketch starts.
-
-The internal time can be automatically synchronized at regular intervals to an external time source.
-This is enabled by calling the `setSyncProvider(provider)` function - the provider argument is
-the address of a function that returns the current time as a `time_t`.
-See the sketches in the examples directory for usage.
-
-The default interval for re-syncing the time is 5 minutes but can be changed by calling the
-`setSyncInterval(interval)` method to set the number of seconds between re-sync attempts.
-
-The Time library defines a structure for holding time elements that is a compact version of the C `tm` structure.
-All the members of the Arduino `tm` structure are bytes and the year is offset from 1970.
-Convenience macros provide conversion to and from the Arduino format.
-
-Low-level functions to convert between system time and individual time elements are provided:
-
-```c
-breakTime(time, &tm);  // break time_t into elements stored in tm struct
-makeTime(&tm);         // return time_t from elements stored in tm struct
+```cpp
+time_t getNtpTime();
+timeClock.setSyncProvider(getNtpTime);
 ```
-# Credits
 
-Based on a fork of: https://github.com/PaulStoffregen/Time
+`timeStatus()` itself never blocks; sync attempts are driven by `now()` /
+`getEpochSecond()`.
+
+## Low-level conversion
+
+```cpp
+timelib2::TimeElements tm;
+timeClock.breakTime(epoch, tm);         // UTC breakdown (reference, not pointer)
+time_t epoch2 = timeClock.makeTime(tm); // UTC assembly
+```
+
+`breakTime()` and `makeTime()` are static and dependency-free, so they can be
+used (and tested) outside Arduino.
+
+## Date strings
+
+```cpp
+timelib2::monthStr(1);       // "January"
+timelib2::monthShortStr(1);  // "Jan"
+timelib2::dayStr(4);         // "Wednesday"
+timelib2::dayShortStr(4);    // "Wed"
+```
+
+The returned pointers reference static literals: reentrant, thread-safe, and
+bounds-checked for invalid indices.
+
+## Multiple clocks
+
+```cpp
+timelib2::Clock localClock;
+timelib2::Clock utcClock;
+
+localClock.setOffset(0);       // UTC
+utcClock.setTimeZone("UTC0");  // also UTC, but via TZ
+```
+
+Each instance keeps independent offset, status, and sync provider. The POSIX
+timezone is process-global.
+
+## Migration from v1
+
+| v1 | v2 |
+| --- | --- |
+| `TimeLib2 clock;` | `timelib2::Clock timeClock;` (or `timelib2::TimeLib2`) |
+| `timeNotSet` | `timelib2::TimeStatus::NotSet` (alias `timelib2::timeNotSet`) |
+| `tmElements_t` | `timelib2::TimeElements` (alias `timelib2::tmElements_t`) |
+| `SECS_PER_MIN` etc. | `timelib2::SECS_PER_MIN` etc. |
+| `getEpochSecond()` includes offset | `getEpochSecond()` returns UTC; offset affects local accessors |
+| `setOffset(x)` changes epoch | `setOffset(x)` changes local calendar values only |
+| `breakTime(t, &tm)` | `timeClock.breakTime(t, tm)` (reference) |
+| `makeTime(&tm)` | `timelib2::Clock::makeTime(tm)` |
+| `monthStr(m)` | `timelib2::monthStr(m)` |
+| `timeStatus_t` | `timelib2::TimeStatus` (alias `timelib2::timeStatus_t`) |
+
+The broken `minutesToTime_t` / `hoursToTime_t` / `daysToTime_t` /
+`weeksToTime_t` macros are now `constexpr` functions and actually compile:
+`timelib2::minutesToTime_t(5)`.
+
+## Examples
+
+- `examples/TimeNTP_ESP32` - SNTP sync and a live clock.
+- `examples/TimeZone_ESP32` - UTC vs POSIX local time with DST.
+- `examples/DeepSleepTime_ESP32` - time persistence across deep sleep.
+- `examples/TimeNTP_ESP8266WiFi` - custom NTP sync provider (legacy provider).
+
+## Tests and CI
+
+Host-side conversion tests live in `test/` and run with:
+
+```sh
+pio test -e native
+```
+
+GitHub Actions runs the native tests and compiles the examples for `esp32dev`.
+
+## License
+
+LGPL-2.1-or-later. See [LICENSE](LICENSE).
+
+Based on a fork of the Arduino Time library by Paul Stoffregen:
+https://github.com/PaulStoffregen/Time

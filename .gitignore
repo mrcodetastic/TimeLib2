@@ -1,0 +1,18 @@
+# PlatformIO build artifacts
+.pio/
+.pioarduino/
+.platformio/
+build/
+
+# Build outputs
+*.bin
+*.elf
+*.map
+
+# Python
+__pycache__/
+*.pyc
+
+# OS noise
+.DS_Store
+Thumbs.db
