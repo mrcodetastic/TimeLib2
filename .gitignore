@@ -3,6 +3,7 @@
 .pioarduino/
 .platformio/
 build/
+.vscode
 
 # Build outputs
 *.bin
