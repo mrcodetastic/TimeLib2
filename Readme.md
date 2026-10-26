@@ -61,7 +61,7 @@ Arduino Library Manager: search for **TimeLib2** by **Faptastic**.
 PlatformIO:
 
 ```ini
-lib_deps = mrfaptastic/TimeLib2
+lib_deps = mrcodetastic/TimeLib2
 ```
 
 ## Time model

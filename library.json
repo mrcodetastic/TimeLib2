@@ -12,9 +12,9 @@
     ],
     "repository": {
         "type": "git",
-        "url": "https://github.com/mrfaptastic/TimeLib2"
+        "url": "https://github.com/mrcodetastic/TimeLib2"
     },
-    "homepage": "https://github.com/mrfaptastic/TimeLib2",
+    "homepage": "https://github.com/mrcodetastic/TimeLib2",
     "frameworks": [
         "arduino"
     ],
